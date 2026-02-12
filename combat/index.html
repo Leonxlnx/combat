@@ -499,7 +499,7 @@
             player.state = isKick ? 'kick' : 'punch';
             player.stateTimer = 0;
 
-            const forward = new THREE.Vector3(0, 0, 1).applyAxisAngle(new THREE.Vector3(0, 1, 0), camYaw);
+            const forward = new THREE.Vector3(-Math.sin(camYaw), 0, -Math.cos(camYaw));
             player.facing.copy(forward);
 
             if (isKick) player.velocity.add(forward.clone().multiplyScalar(30)); // Lunge forward
@@ -570,13 +570,15 @@
             // Player Movement Update
             if (!player.dead) {
                 let moveX = 0; let moveZ = 0;
-                if (keys.w) moveZ -= 1; if (keys.s) moveZ += 1;
-                if (keys.a) moveX -= 1; if (keys.d) moveX += 1;
+                if (keys.w) moveZ += 1; if (keys.s) moveZ -= 1;
+                if (keys.a) moveX += 1; if (keys.d) moveX -= 1;
 
                 if ((moveX !== 0 || moveZ !== 0) && player.state !== 'punch' && player.state !== 'kick' && player.state !== 'hit') {
                     player.state = 'walk';
-                    let dir = new THREE.Vector3(moveX, 0, moveZ).normalize();
-                    dir.applyAxisAngle(new THREE.Vector3(0, 1, 0), camYaw);
+                    // Build move direction relative to camera yaw
+                    const fwd = new THREE.Vector3(-Math.sin(camYaw), 0, -Math.cos(camYaw));
+                    const right = new THREE.Vector3(-Math.cos(camYaw), 0, Math.sin(camYaw));
+                    let dir = fwd.multiplyScalar(moveZ).add(right.multiplyScalar(moveX)).normalize();
                     player.facing.copy(dir);
                     player.velocity.add(dir.multiplyScalar(75 * dt));
                 } else if (player.state === 'walk') player.state = 'idle';
@@ -647,14 +649,20 @@
 
             // GTA-Style Over-the-Shoulder Camera tracking
             if (!player.dead) {
-                const euler = new THREE.Euler(camPitch, camYaw, 0, 'YXZ');
-                camera.quaternion.setFromEuler(euler);
+                // Player look-at target (chest height)
+                const lookTarget = player.root.position.clone().add(new THREE.Vector3(0, 2.0, 0));
 
-                // Offset camera over the right shoulder
-                const offset = new THREE.Vector3(1.2, 0.4, 4.5);
-                offset.applyEuler(euler);
+                // Spherical orbit: camera sits behind + above + slightly right of the player
+                const camDist = 5.5;
+                const shoulderOffset = 1.0; // Right-shoulder offset
+                const heightOffset = 2.2;
 
-                const targetPos = player.root.position.clone().add(new THREE.Vector3(0, 1.5, 0)).add(offset);
+                // Calculate camera position using yaw/pitch as orbit angles
+                const camX = player.root.position.x + Math.sin(camYaw) * camDist * Math.cos(camPitch) + Math.cos(camYaw) * shoulderOffset;
+                const camY = player.root.position.y + heightOffset + Math.sin(camPitch) * camDist;
+                const camZ = player.root.position.z + Math.cos(camYaw) * camDist * Math.cos(camPitch) - Math.sin(camYaw) * shoulderOffset;
+
+                const targetPos = new THREE.Vector3(camX, camY, camZ);
 
                 // Apply Screen Shake
                 if (cameraShake > 0) {
@@ -665,7 +673,8 @@
                 }
 
                 // Smooth camera follow
-                camera.position.lerp(targetPos, 0.25);
+                camera.position.lerp(targetPos, 0.15);
+                camera.lookAt(lookTarget);
             }
 
             renderer.render(scene, camera);
