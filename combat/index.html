@@ -194,24 +194,103 @@
 
         scene.add(new THREE.DirectionalLight(0x00aaff, 1.0)).position.set(20, 10, -20); // Neon Rim light
 
-        // Asphalt Floor
+        // --- REALISTIC GROUND ---
+        // Create a canvas texture for concrete/asphalt look
+        const groundCanvas = document.createElement('canvas');
+        groundCanvas.width = 512; groundCanvas.height = 512;
+        const gCtx = groundCanvas.getContext('2d');
+        // Base asphalt color
+        gCtx.fillStyle = '#2a2a2a';
+        gCtx.fillRect(0, 0, 512, 512);
+        // Add noise/grain for realism
+        for (let i = 0; i < 30000; i++) {
+            const x = Math.random() * 512;
+            const y = Math.random() * 512;
+            const brightness = 20 + Math.random() * 40;
+            gCtx.fillStyle = `rgb(${brightness},${brightness},${brightness})`;
+            gCtx.fillRect(x, y, Math.random() * 3 + 1, Math.random() * 3 + 1);
+        }
+        // Add some cracks
+        gCtx.strokeStyle = '#111';
+        gCtx.lineWidth = 1;
+        for (let i = 0; i < 15; i++) {
+            gCtx.beginPath();
+            let cx = Math.random() * 512, cy = Math.random() * 512;
+            gCtx.moveTo(cx, cy);
+            for (let j = 0; j < 5; j++) {
+                cx += (Math.random() - 0.5) * 80;
+                cy += (Math.random() - 0.5) * 80;
+                gCtx.lineTo(cx, cy);
+            }
+            gCtx.stroke();
+        }
+        // Road line markings
+        gCtx.strokeStyle = '#555';
+        gCtx.lineWidth = 4;
+        gCtx.setLineDash([30, 20]);
+        gCtx.beginPath(); gCtx.moveTo(256, 0); gCtx.lineTo(256, 512); gCtx.stroke();
+        gCtx.setLineDash([]);
+
+        const groundTex = new THREE.CanvasTexture(groundCanvas);
+        groundTex.wrapS = groundTex.wrapT = THREE.RepeatWrapping;
+        groundTex.repeat.set(40, 40);
+
         const groundMesh = new THREE.Mesh(
             new THREE.PlaneGeometry(400, 400),
-            new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.8, metalness: 0.2 })
+            new THREE.MeshStandardMaterial({ map: groundTex, roughness: 0.95, metalness: 0.05 })
         );
         groundMesh.rotation.x = -Math.PI / 2;
         groundMesh.receiveShadow = true;
         scene.add(groundMesh);
 
-        const gridHelper = new THREE.GridHelper(400, 100, 0x00ffff, 0xff2a75);
-        gridHelper.position.y = 0.05;
+        // Subtle neon grid overlay
+        const gridHelper = new THREE.GridHelper(400, 80, 0x00ffff, 0xff2a75);
+        gridHelper.position.y = 0.02;
         gridHelper.material.transparent = true;
-        gridHelper.material.opacity = 0.3;
+        gridHelper.material.opacity = 0.08;
         scene.add(gridHelper);
 
         const groundBody = new CANNON.Body({ type: CANNON.Body.STATIC, shape: new CANNON.Plane(), material: groundMat });
         groundBody.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
         world.addBody(groundBody);
+
+        // --- ENVIRONMENT PROPS (Walls, containers, street stuff) ---
+        const wallMat = new THREE.MeshStandardMaterial({ color: 0x443333, roughness: 0.9, metalness: 0.1 });
+        const neonMat = new THREE.MeshStandardMaterial({ color: 0xff2a75, emissive: 0xff2a75, emissiveIntensity: 2.0 });
+        const cyanMat = new THREE.MeshStandardMaterial({ color: 0x00ffff, emissive: 0x00ffff, emissiveIntensity: 2.0 });
+
+        function addWall(x, z, w, h, d, ry) {
+            const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), wallMat);
+            m.position.set(x, h / 2, z); m.rotation.y = ry || 0;
+            m.castShadow = true; m.receiveShadow = true;
+            scene.add(m);
+        }
+        function addNeonStrip(x, y, z, w, h, d, mat) {
+            const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+            m.position.set(x, y, z); scene.add(m);
+        }
+
+        // Surrounding walls
+        addWall(0, -50, 120, 8, 1); addWall(0, 50, 120, 8, 1);
+        addWall(-60, 0, 1, 8, 100); addWall(60, 0, 1, 8, 100);
+        // Shipping containers
+        addWall(-30, -20, 6, 4, 3); addWall(25, 15, 4, 3, 8);
+        addWall(40, -30, 3, 5, 3); addWall(-20, 30, 8, 3, 3);
+        // Neon accent strips on walls
+        addNeonStrip(0, 6, -50, 60, 0.15, 0.15, neonMat);
+        addNeonStrip(0, 6, 50, 60, 0.15, 0.15, neonMat);
+        addNeonStrip(-60, 4, 0, 0.15, 0.15, 50, cyanMat);
+        addNeonStrip(60, 4, 0, 0.15, 0.15, 50, cyanMat);
+
+        // Street lights
+        for (let i = -2; i <= 2; i++) {
+            const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 6), new THREE.MeshStandardMaterial({ color: 0x555555 }));
+            pole.position.set(i * 25, 3, -25); pole.castShadow = true; scene.add(pole);
+            const light = new THREE.PointLight(0xffaa55, 3, 20);
+            light.position.set(i * 25, 6, -25); scene.add(light);
+            const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.2), new THREE.MeshStandardMaterial({ emissive: 0xffaa55, emissiveIntensity: 3 }));
+            bulb.position.copy(light.position); scene.add(bulb);
+        }
 
         // --- 2. "BONES IN BODIES" SYSTEM ---
         // Generates a body part with a translucent outer shell and a solid inner skeleton
@@ -464,7 +543,7 @@
         let keys = { w: false, a: false, s: false, d: false };
 
         let isPointerLocked = false;
-        let camYaw = 0; let camPitch = 0.2;
+        let camYaw = 0; let camPitch = 0.35;
         let cameraShake = 0;
         let timeScale = 1.0; let slowMoTimer = 0;
         let customTime = 0; let lastAttack = 0;
@@ -483,8 +562,8 @@
         document.addEventListener('mousemove', e => {
             if (isPointerLocked) {
                 camYaw -= e.movementX * 0.003;
-                camPitch -= e.movementY * 0.003;
-                camPitch = Math.max(-Math.PI / 4, Math.min(Math.PI / 3, camPitch));
+                camPitch += e.movementY * 0.003;
+                camPitch = Math.max(0.05, Math.min(1.2, camPitch));
             }
         });
 
@@ -499,7 +578,7 @@
             player.state = isKick ? 'kick' : 'punch';
             player.stateTimer = 0;
 
-            const forward = new THREE.Vector3(-Math.sin(camYaw), 0, -Math.cos(camYaw));
+            const forward = new THREE.Vector3(Math.sin(camYaw), 0, Math.cos(camYaw)).negate();
             player.facing.copy(forward);
 
             if (isKick) player.velocity.add(forward.clone().multiplyScalar(30)); // Lunge forward
@@ -575,12 +654,15 @@
 
                 if ((moveX !== 0 || moveZ !== 0) && player.state !== 'punch' && player.state !== 'kick' && player.state !== 'hit') {
                     player.state = 'walk';
-                    // Build move direction relative to camera yaw
+                    // Build move direction relative to camera yaw (clone to avoid mutation!)
                     const fwd = new THREE.Vector3(-Math.sin(camYaw), 0, -Math.cos(camYaw));
-                    const right = new THREE.Vector3(-Math.cos(camYaw), 0, Math.sin(camYaw));
-                    let dir = fwd.multiplyScalar(moveZ).add(right.multiplyScalar(moveX)).normalize();
+                    const right = new THREE.Vector3(fwd.z, 0, -fwd.x); // perpendicular right
+                    let dir = new THREE.Vector3();
+                    dir.addScaledVector(fwd, moveZ);
+                    dir.addScaledVector(right, moveX);
+                    dir.normalize();
                     player.facing.copy(dir);
-                    player.velocity.add(dir.multiplyScalar(75 * dt));
+                    player.velocity.addScaledVector(dir, 75 * dt);
                 } else if (player.state === 'walk') player.state = 'idle';
             }
 
@@ -649,20 +731,34 @@
 
             // GTA-Style Over-the-Shoulder Camera tracking
             if (!player.dead) {
-                // Player look-at target (chest height)
-                const lookTarget = player.root.position.clone().add(new THREE.Vector3(0, 2.0, 0));
+                // Camera config - CLOSE behind player like GTA
+                const camDist = 3.2;
+                const shoulderX = 0.6; // slight right offset
+                const baseHeight = 1.8;
 
-                // Spherical orbit: camera sits behind + above + slightly right of the player
-                const camDist = 5.5;
-                const shoulderOffset = 1.0; // Right-shoulder offset
-                const heightOffset = 2.2;
+                // Spherical orbit: pitch controls vertical angle (always above player)
+                const hDist = camDist * Math.cos(camPitch);
+                const vDist = camDist * Math.sin(camPitch) + baseHeight;
 
-                // Calculate camera position using yaw/pitch as orbit angles
-                const camX = player.root.position.x + Math.sin(camYaw) * camDist * Math.cos(camPitch) + Math.cos(camYaw) * shoulderOffset;
-                const camY = player.root.position.y + heightOffset + Math.sin(camPitch) * camDist;
-                const camZ = player.root.position.z + Math.cos(camYaw) * camDist * Math.cos(camPitch) - Math.sin(camYaw) * shoulderOffset;
+                // Camera sits BEHIND the player based on yaw
+                const px = player.root.position.x;
+                const py = player.root.position.y;
+                const pz = player.root.position.z;
 
-                const targetPos = new THREE.Vector3(camX, camY, camZ);
+                const behindX = Math.sin(camYaw) * hDist;
+                const behindZ = Math.cos(camYaw) * hDist;
+                // Shoulder offset perpendicular to look direction
+                const rightX = Math.cos(camYaw) * shoulderX;
+                const rightZ = -Math.sin(camYaw) * shoulderX;
+
+                const targetPos = new THREE.Vector3(
+                    px + behindX + rightX,
+                    py + vDist,
+                    pz + behindZ + rightZ
+                );
+
+                // Look at player upper body
+                const lookTarget = new THREE.Vector3(px, py + 2.0, pz);
 
                 // Apply Screen Shake
                 if (cameraShake > 0) {
@@ -673,7 +769,7 @@
                 }
 
                 // Smooth camera follow
-                camera.position.lerp(targetPos, 0.15);
+                camera.position.lerp(targetPos, 0.12);
                 camera.lookAt(lookTarget);
             }
 
