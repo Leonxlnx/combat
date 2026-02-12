@@ -160,7 +160,8 @@
         scene.background = new THREE.Color(0xff6644); // Miami sunset sky
         scene.fog = new THREE.FogExp2(0xff6644, 0.012);
 
-        const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 300);
+        const camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 300);
+        camera.position.set(0, 3.5, 5); // START above and behind player immediately
 
         const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
         renderer.setSize(window.innerWidth, window.innerHeight);
@@ -543,7 +544,7 @@
         let keys = { w: false, a: false, s: false, d: false };
 
         let isPointerLocked = false;
-        let camYaw = 0; let camPitch = 0.35;
+        let camYaw = 0; let camLookHeight = 1.8; // height we look at on player
         let cameraShake = 0;
         let timeScale = 1.0; let slowMoTimer = 0;
         let customTime = 0; let lastAttack = 0;
@@ -562,8 +563,8 @@
         document.addEventListener('mousemove', e => {
             if (isPointerLocked) {
                 camYaw -= e.movementX * 0.003;
-                camPitch += e.movementY * 0.003;
-                camPitch = Math.max(0.05, Math.min(1.2, camPitch));
+                camLookHeight -= e.movementY * 0.01;
+                camLookHeight = Math.max(0.5, Math.min(3.5, camLookHeight));
             }
         });
 
@@ -731,34 +732,23 @@
 
             // GTA-Style Over-the-Shoulder Camera tracking
             if (!player.dead) {
-                // Camera config - CLOSE behind player like GTA
-                const camDist = 3.2;
-                const shoulderX = 0.6; // slight right offset
-                const baseHeight = 1.8;
+                // SIMPLE: Camera always behind player, fixed height, yaw orbit
+                const BEHIND_DIST = 4.0;  // how far behind
+                const CAM_HEIGHT = 3.5;    // fixed height above player
+                const SHOULDER = 0.7;      // right shoulder offset
 
-                // Spherical orbit: pitch controls vertical angle (always above player)
-                const hDist = camDist * Math.cos(camPitch);
-                const vDist = camDist * Math.sin(camPitch) + baseHeight;
-
-                // Camera sits BEHIND the player based on yaw
                 const px = player.root.position.x;
                 const py = player.root.position.y;
                 const pz = player.root.position.z;
 
-                const behindX = Math.sin(camYaw) * hDist;
-                const behindZ = Math.cos(camYaw) * hDist;
-                // Shoulder offset perpendicular to look direction
-                const rightX = Math.cos(camYaw) * shoulderX;
-                const rightZ = -Math.sin(camYaw) * shoulderX;
+                // "Behind" = opposite of where camera looks
+                // Camera looks in direction (-sin(yaw), 0, -cos(yaw))
+                // So "behind" is (+sin(yaw), 0, +cos(yaw))
+                const targetX = px + Math.sin(camYaw) * BEHIND_DIST + Math.cos(camYaw) * SHOULDER;
+                const targetY = py + CAM_HEIGHT;
+                const targetZ = pz + Math.cos(camYaw) * BEHIND_DIST - Math.sin(camYaw) * SHOULDER;
 
-                const targetPos = new THREE.Vector3(
-                    px + behindX + rightX,
-                    py + vDist,
-                    pz + behindZ + rightZ
-                );
-
-                // Look at player upper body
-                const lookTarget = new THREE.Vector3(px, py + 2.0, pz);
+                const targetPos = new THREE.Vector3(targetX, targetY, targetZ);
 
                 // Apply Screen Shake
                 if (cameraShake > 0) {
@@ -768,9 +758,11 @@
                     cameraShake -= realDt * 2;
                 }
 
-                // Smooth camera follow
-                camera.position.lerp(targetPos, 0.12);
-                camera.lookAt(lookTarget);
+                // Fast smooth follow - NO slow lerp!
+                camera.position.lerp(targetPos, 0.3);
+
+                // Look at player body at adjustable height
+                camera.lookAt(px, py + camLookHeight, pz);
             }
 
             renderer.render(scene, camera);
