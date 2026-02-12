@@ -1,0 +1,686 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GTA 6 Level - Crazy Bones Simulator</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: #000;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            user-select: none;
+        }
+
+        #ui {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            text-shadow: 2px 2px 0px #000;
+            z-index: 10;
+            pointer-events: none;
+        }
+
+        #ui h1 {
+            color: #00ffff;
+            font-style: italic;
+            font-weight: 900;
+            font-size: 45px;
+            margin-bottom: 0;
+            text-shadow: 3px 3px 0 #ff2a75, 0 0 20px #00ffff;
+            letter-spacing: 2px;
+        }
+
+        #ui h2 {
+            color: #fff;
+            margin-top: 0;
+            letter-spacing: 3px;
+            font-size: 20px;
+            text-transform: uppercase;
+        }
+
+        .stats {
+            font-size: 24px;
+            font-weight: bold;
+            background: rgba(0, 0, 0, 0.6);
+            padding: 15px;
+            border-left: 5px solid #00ffff;
+            width: fit-content;
+            border-radius: 0 10px 10px 0;
+            box-shadow: 0 0 10px rgba(0, 255, 255, 0.3);
+        }
+
+        #crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 6px;
+            height: 6px;
+            background: white;
+            transform: translate(-50%, -50%);
+            border-radius: 50%;
+            mix-blend-mode: difference;
+            z-index: 10;
+            pointer-events: none;
+        }
+
+        #hit-marker {
+            position: absolute;
+            top: 35%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #fff;
+            font-size: 60px;
+            font-weight: 900;
+            font-style: italic;
+            text-shadow: 0 0 30px #ff2a75, 3px 3px 0 #000;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.1s;
+            z-index: 10;
+        }
+
+        #blocker {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: radial-gradient(circle, #220011 0%, #000000 100%);
+            z-index: 20;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            cursor: pointer;
+            text-align: center;
+        }
+
+        #blocker h1 {
+            font-size: 80px;
+            color: #ff2a75;
+            text-shadow: 0 0 30px #ff2a75;
+            margin-bottom: 10px;
+            font-style: italic;
+        }
+
+        #blocker p {
+            font-size: 22px;
+            color: #ddd;
+            margin: 5px;
+        }
+
+        .highlight {
+            color: #00ffff;
+            font-weight: bold;
+            font-size: 26px;
+        }
+    </style>
+
+    <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+        "cannon-es": "https://unpkg.com/cannon-es@0.20.0/dist/cannon-es.js"
+      }
+    }
+    </script>
+</head>
+
+<body>
+    <div id="ui">
+        <h1>VICE CITY BRAWL</h1>
+        <h2>Crazy Bones Engine</h2>
+        <div class="stats">
+            HP: <span id="hp" style="color:#00ff00;">100</span><br>
+            BONES SHATTERED: <span id="score" style="color:#ff2a75;">0</span>
+        </div>
+    </div>
+
+    <div id="crosshair"></div>
+    <div id="hit-marker">BONE SHATTERED!</div>
+
+    <div id="blocker">
+        <h1>CLICK TO ENTER</h1>
+        <p>[W A S D] to Move &nbsp;&nbsp;|&nbsp;&nbsp; [MOUSE] to Look</p>
+        <p>[LEFT CLICK]: Snap Punch &nbsp;&nbsp;|&nbsp;&nbsp; [RIGHT CLICK]: Tornado Kick</p>
+        <p class="highlight" style="margin-top: 30px;">Shatter their bodies to trigger GTA-style Slow-Mo!</p>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import * as CANNON from 'cannon-es';
+
+        // --- 1. ENGINE & ENVIRONMENT SETUP ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xff6644); // Miami sunset sky
+        scene.fog = new THREE.FogExp2(0xff6644, 0.012);
+
+        const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 300);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        document.body.appendChild(renderer.domElement);
+
+        const world = new CANNON.World({ gravity: new CANNON.Vec3(0, -25, 0) });
+
+        // Bouncy Physics Materials for Shattering Bones
+        const bouncyMat = new CANNON.Material();
+        const groundMat = new CANNON.Material();
+        world.addContactMaterial(new CANNON.ContactMaterial(groundMat, bouncyMat, { friction: 0.4, restitution: 0.6 }));
+
+        // Lighting (GTA 6 Sunset Vibe)
+        scene.add(new THREE.HemisphereLight(0xffffff, 0x442266, 0.5));
+
+        const dirLight = new THREE.DirectionalLight(0xffddaa, 2.5);
+        dirLight.position.set(-30, 40, 20);
+        dirLight.castShadow = true;
+        dirLight.shadow.mapSize.width = 2048;
+        dirLight.shadow.mapSize.height = 2048;
+        dirLight.shadow.camera.near = 0.5;
+        dirLight.shadow.camera.far = 150;
+        dirLight.shadow.camera.left = -50;
+        dirLight.shadow.camera.right = 50;
+        dirLight.shadow.camera.top = 50;
+        dirLight.shadow.camera.bottom = -50;
+        dirLight.shadow.bias = -0.0005;
+        scene.add(dirLight);
+
+        scene.add(new THREE.DirectionalLight(0x00aaff, 1.0)).position.set(20, 10, -20); // Neon Rim light
+
+        // Asphalt Floor
+        const groundMesh = new THREE.Mesh(
+            new THREE.PlaneGeometry(400, 400),
+            new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.8, metalness: 0.2 })
+        );
+        groundMesh.rotation.x = -Math.PI / 2;
+        groundMesh.receiveShadow = true;
+        scene.add(groundMesh);
+
+        const gridHelper = new THREE.GridHelper(400, 100, 0x00ffff, 0xff2a75);
+        gridHelper.position.y = 0.05;
+        gridHelper.material.transparent = true;
+        gridHelper.material.opacity = 0.3;
+        scene.add(gridHelper);
+
+        const groundBody = new CANNON.Body({ type: CANNON.Body.STATIC, shape: new CANNON.Plane(), material: groundMat });
+        groundBody.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
+        world.addBody(groundBody);
+
+        // --- 2. "BONES IN BODIES" SYSTEM ---
+        // Generates a body part with a translucent outer shell and a solid inner skeleton
+        function createPart(w, h, d, color) {
+            const group = new THREE.Group();
+
+            // Outer Flesh (Translucent glowing jelly effect)
+            const fleshMat = new THREE.MeshStandardMaterial({
+                color: color, transparent: true, opacity: 0.45, roughness: 0.1, metalness: 0.5, depthWrite: false
+            });
+            const fleshMesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), fleshMat);
+            fleshMesh.castShadow = true;
+            fleshMesh.receiveShadow = true;
+
+            // Inner Skeleton Bones (Solid White)
+            const boneMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9, metalness: 0.0 });
+            const boneMesh = new THREE.Mesh(new THREE.BoxGeometry(w * 0.3, h * 0.9, d * 0.3), boneMat);
+            boneMesh.castShadow = true;
+
+            group.add(fleshMesh);
+            group.add(boneMesh);
+
+            return { group, flesh: fleshMesh, bone: boneMesh, size: [w, h, d] };
+        }
+
+        class Character {
+            constructor(x, z, isPlayer) {
+                this.isPlayer = isPlayer;
+                this.color = isPlayer ? 0x00ffff : 0xff2a75;
+                this.health = 100;
+                this.dead = false;
+
+                this.root = new THREE.Group();
+                this.root.position.set(x, 0, z);
+                scene.add(this.root);
+
+                this.hips = new THREE.Group();
+                this.hips.position.y = 1.2;
+                this.root.add(this.hips);
+
+                // Procedural Hierarchy Assembly
+                this.torso = createPart(0.6, 1.0, 0.4, this.color);
+                this.torso.group.position.y = 0.5;
+                this.hips.add(this.torso.group);
+
+                this.headPivot = new THREE.Group();
+                this.headPivot.position.y = 0.5;
+                this.torso.group.add(this.headPivot);
+                this.head = createPart(0.35, 0.35, 0.35, 0xffddcc);
+                this.head.group.position.y = 0.2;
+                this.headPivot.add(this.head.group);
+
+                const addLimb = (parent, px, py, pw, ph, pd, color, jointY) => {
+                    const pivot = new THREE.Group();
+                    pivot.position.set(px, py, 0);
+                    parent.add(pivot);
+                    const part = createPart(pw, ph, pd, color);
+                    part.group.position.y = jointY;
+                    pivot.add(part.group);
+                    return { pivot, part };
+                };
+
+                const lArm = addLimb(this.torso.group, -0.4, 0.4, 0.2, 0.5, 0.2, this.color, -0.25);
+                const lFore = addLimb(lArm.part.group, 0, -0.25, 0.15, 0.5, 0.15, 0xffddcc, -0.25);
+
+                const rArm = addLimb(this.torso.group, 0.4, 0.4, 0.2, 0.5, 0.2, this.color, -0.25);
+                const rFore = addLimb(rArm.part.group, 0, -0.25, 0.15, 0.5, 0.15, 0xffddcc, -0.25);
+
+                const lLeg = addLimb(this.hips, -0.2, 0, 0.25, 0.6, 0.25, 0x222222, -0.3);
+                const lCalf = addLimb(lLeg.part.group, 0, -0.3, 0.2, 0.6, 0.2, this.color, -0.3);
+
+                const rLeg = addLimb(this.hips, 0.2, 0, 0.25, 0.6, 0.25, 0x222222, -0.3);
+                const rCalf = addLimb(rLeg.part.group, 0, -0.3, 0.2, 0.6, 0.2, this.color, -0.3);
+
+                this.joints = { lArm: lArm.pivot, rArm: rArm.pivot, lLeg: lLeg.pivot, rLeg: rLeg.pivot, lFore: lFore.pivot, rFore: rFore.pivot };
+                this.parts = [this.torso, this.head, lArm.part, lFore.part, rArm.part, rFore.part, lLeg.part, lCalf.part, rLeg.part, rCalf.part];
+
+                this.velocity = new THREE.Vector3();
+                this.facing = new THREE.Vector3(0, 0, 1);
+                this.state = 'idle';
+                this.stateTimer = 0;
+                this.physicsBodies = [];
+                this.animOffset = Math.random() * 10;
+            }
+
+            // Crazy Procedural Animations using Math.sin
+            update(dt, time) {
+                if (this.dead) return;
+
+                // Smooth rotation towards facing direction
+                const targetAngle = Math.atan2(this.facing.x, this.facing.z);
+                let diff = targetAngle - this.root.rotation.y;
+                while (diff < -Math.PI) diff += Math.PI * 2;
+                while (diff > Math.PI) diff -= Math.PI * 2;
+                this.root.rotation.y += diff * 12 * dt;
+
+                this.stateTimer += dt;
+                const t = this.stateTimer;
+
+                // Reset Pose
+                this.joints.lArm.rotation.set(0, 0, 0); this.joints.rArm.rotation.set(0, 0, 0);
+                this.joints.lLeg.rotation.set(0, 0, 0); this.joints.rLeg.rotation.set(0, 0, 0);
+                this.joints.lFore.rotation.set(0, 0, 0); this.joints.rFore.rotation.set(0, 0, 0);
+                this.hips.rotation.set(0, 0, 0); this.torso.group.rotation.set(0, 0, 0); this.headPivot.rotation.set(0, 0, 0);
+
+                if (this.state === 'idle') {
+                    this.hips.position.y = 1.2 + Math.sin(time * 3 + this.animOffset) * 0.05;
+                    this.joints.lArm.rotation.z = 0.1; this.joints.rArm.rotation.z = -0.1;
+                    this.joints.lArm.rotation.x = Math.sin(time * 2) * 0.1;
+                    this.joints.rArm.rotation.x = -Math.sin(time * 2) * 0.1;
+                }
+                else if (this.state === 'walk') {
+                    const spd = 15;
+                    this.hips.position.y = 1.2 + Math.abs(Math.sin(time * spd)) * 0.1;
+                    this.joints.lLeg.rotation.x = Math.sin(time * spd) * 1.0;
+                    this.joints.rLeg.rotation.x = Math.sin(time * spd + Math.PI) * 1.0;
+
+                    // Exaggerated arm swing
+                    this.joints.lArm.rotation.x = Math.sin(time * spd + Math.PI) * 1.2;
+                    this.joints.rArm.rotation.x = Math.sin(time * spd) * 1.2;
+                    this.joints.lFore.rotation.x = -0.5; this.joints.rFore.rotation.x = -0.5;
+                    this.torso.group.rotation.y = Math.sin(time * spd) * 0.3;
+                    this.torso.group.rotation.x = 0.2; // Lean forward
+                }
+                else if (this.state === 'punch') {
+                    const p = t / 0.25;
+                    if (p < 1) {
+                        this.joints.rArm.rotation.x = -Math.PI / 1.5 * Math.sin(p * Math.PI); // Snap forward
+                        this.joints.rFore.rotation.x = -0.5 * Math.sin(p * Math.PI);
+                        this.torso.group.rotation.y = Math.PI / 3 * Math.sin(p * Math.PI); // Twist body
+                        this.hips.position.y = 1.2 + 0.2 * Math.sin(p * Math.PI);
+                    } else this.state = 'idle';
+                }
+                else if (this.state === 'kick') {
+                    const p = t / 0.5;
+                    if (p < 1) {
+                        this.joints.rLeg.rotation.x = -Math.PI / 1.5 * Math.sin(p * Math.PI); // Leg up
+                        this.torso.group.rotation.x = 0.5 * Math.sin(p * Math.PI); // Lean back
+                        this.root.rotation.y += 20 * dt; // Crazy Tornado Spin
+                        this.hips.position.y = 1.2 + 2.5 * Math.sin(p * Math.PI); // Huge leap
+                        this.joints.lArm.rotation.z = 1.5 * Math.sin(p * Math.PI); // Arms out for balance
+                        this.joints.rArm.rotation.z = -1.5 * Math.sin(p * Math.PI);
+                    } else this.state = 'idle';
+                }
+                else if (this.state === 'hit') {
+                    if (t < 0.3) {
+                        const p = t / 0.3;
+                        this.torso.group.rotation.x = -1.2 * Math.sin(p * Math.PI); // Violent snap back
+                        this.headPivot.rotation.x = -1.0 * Math.sin(p * Math.PI);
+                        this.joints.lArm.rotation.x = 1.5 * Math.sin(p * Math.PI); // Arms fly wildly up
+                        this.joints.rArm.rotation.x = 1.5 * Math.sin(p * Math.PI);
+                    } else this.state = 'idle';
+                }
+
+                // Apply Velocity & Friction
+                this.root.position.addScaledVector(this.velocity, dt);
+                this.velocity.x *= 0.85; this.velocity.z *= 0.85;
+
+                // Keep inside arena bounds
+                this.root.position.x = Math.max(-180, Math.min(180, this.root.position.x));
+                this.root.position.z = Math.max(-180, Math.min(180, this.root.position.z));
+            }
+
+            takeDamage(amount, forceDir) {
+                if (this.dead) return;
+                this.health -= amount;
+                this.velocity.add(forceDir.clone().multiplyScalar(amount * 0.4)); // Heavy Knockback
+                this.state = 'hit';
+                this.stateTimer = 0;
+
+                spawnBlood(this.root.position.clone().add(new THREE.Vector3(0, 1.5, 0)), forceDir);
+
+                if (this.health <= 0) this.shatter(forceDir);
+            }
+
+            // The Core "Bones in Bodies" explosion mechanic
+            shatter(forceDir) {
+                this.dead = true;
+
+                this.parts.forEach(p => {
+                    // Hide flesh, reveal bloody bones
+                    p.flesh.visible = false;
+                    p.bone.material = new THREE.MeshStandardMaterial({ color: 0xcc0000, roughness: 0.5 });
+                    p.bone.scale.set(1.5, 1.5, 1.5);
+
+                    // Get current world coordinates of the body part
+                    const wPos = new THREE.Vector3(); const wQuat = new THREE.Quaternion();
+                    p.group.getWorldPosition(wPos); p.group.getWorldQuaternion(wQuat);
+
+                    // Detach from hierarchy and add directly to scene
+                    scene.add(p.group);
+                    p.group.position.copy(wPos); p.group.quaternion.copy(wQuat);
+
+                    // Create CANNON.js Rigid Body for the bone
+                    const shape = new CANNON.Box(new CANNON.Vec3(p.size[0] / 2, p.size[1] / 2, p.size[2] / 2));
+                    const body = new CANNON.Body({ mass: 10, material: bouncyMat });
+                    body.addShape(shape);
+                    body.position.copy(wPos); body.quaternion.copy(wQuat);
+
+                    // Apply Violent Physics Explosion
+                    body.velocity.set(
+                        (Math.random() - 0.5) * 40 + forceDir.x * 45,
+                        Math.random() * 30 + 20,
+                        (Math.random() - 0.5) * 40 + forceDir.z * 45
+                    );
+                    body.angularVelocity.set((Math.random() - 0.5) * 50, (Math.random() - 0.5) * 50, (Math.random() - 0.5) * 50);
+
+                    world.addBody(body);
+                    this.physicsBodies.push({ mesh: p.group, body: body });
+                });
+
+                this.root.visible = false;
+
+                if (!this.isPlayer) {
+                    score++;
+                    document.getElementById('score').innerText = score;
+                    triggerCinematicSlowMo();
+
+                    // UI Hit Marker
+                    const marker = document.getElementById('hit-marker');
+                    marker.style.opacity = 1;
+                    marker.style.transform = `translate(-50%, -50%) scale(${1 + Math.random()}) rotate(${(Math.random() - 0.5) * 20}deg)`;
+                    setTimeout(() => marker.style.opacity = 0, 1500);
+                }
+            }
+        }
+
+        // --- 3. BLOOD PARTICLES ---
+        const particles = [];
+        const bloodGeo = new THREE.BoxGeometry(0.15, 0.15, 0.15);
+        const bloodMat = new THREE.MeshStandardMaterial({ color: 0xff0000, roughness: 0.2, emissive: 0x550000 });
+
+        function spawnBlood(pos, dir) {
+            for (let i = 0; i < 40; i++) {
+                const mesh = new THREE.Mesh(bloodGeo, bloodMat);
+                mesh.position.copy(pos).add(new THREE.Vector3((Math.random() - 0.5) * 0.8, (Math.random() - 0.5) * 0.8, (Math.random() - 0.5) * 0.8));
+                scene.add(mesh);
+                const speed = Math.random() * 20 + 10;
+                particles.push({
+                    mesh: mesh, life: 1.0 + Math.random(),
+                    vel: new THREE.Vector3(dir.x * speed + (Math.random() - 0.5) * 20, Math.random() * 20 + 5, dir.z * speed + (Math.random() - 0.5) * 20)
+                });
+            }
+        }
+
+        // --- 4. GAME LOGIC & CONTROLS ---
+        let player = new Character(0, 0, true);
+        let enemies = [];
+        let score = 0;
+        let keys = { w: false, a: false, s: false, d: false };
+
+        let isPointerLocked = false;
+        let camYaw = 0; let camPitch = 0.2;
+        let cameraShake = 0;
+        let timeScale = 1.0; let slowMoTimer = 0;
+        let customTime = 0; let lastAttack = 0;
+
+        document.addEventListener('keydown', e => { if (keys.hasOwnProperty(e.key.toLowerCase())) keys[e.key.toLowerCase()] = true; });
+        document.addEventListener('keyup', e => { if (keys.hasOwnProperty(e.key.toLowerCase())) keys[e.key.toLowerCase()] = false; });
+        document.addEventListener('contextmenu', e => e.preventDefault()); // Stop right click menu
+
+        const blocker = document.getElementById('blocker');
+        blocker.addEventListener('click', () => document.body.requestPointerLock());
+        document.addEventListener('pointerlockchange', () => {
+            isPointerLocked = document.pointerLockElement === document.body;
+            blocker.style.display = isPointerLocked ? 'none' : 'flex';
+        });
+
+        document.addEventListener('mousemove', e => {
+            if (isPointerLocked) {
+                camYaw -= e.movementX * 0.003;
+                camPitch -= e.movementY * 0.003;
+                camPitch = Math.max(-Math.PI / 4, Math.min(Math.PI / 3, camPitch));
+            }
+        });
+
+        // Attack Logic
+        document.addEventListener('mousedown', e => {
+            if (!isPointerLocked || player.dead) return;
+            const now = performance.now();
+            if (now - lastAttack < 400) return; // Attack Cooldown
+            lastAttack = now;
+
+            const isKick = e.button === 2;
+            player.state = isKick ? 'kick' : 'punch';
+            player.stateTimer = 0;
+
+            const forward = new THREE.Vector3(0, 0, 1).applyAxisAngle(new THREE.Vector3(0, 1, 0), camYaw);
+            player.facing.copy(forward);
+
+            if (isKick) player.velocity.add(forward.clone().multiplyScalar(30)); // Lunge forward
+
+            // Hit Registration
+            enemies.forEach(enemy => {
+                if (enemy.dead) return;
+                if (player.root.position.distanceTo(enemy.root.position) < 4.0) {
+                    const dir = enemy.root.position.clone().sub(player.root.position).normalize();
+                    if (forward.dot(dir) > 0.4) {
+                        setTimeout(() => {
+                            if (enemy.dead) return;
+                            // Kicks instantly kill, punches take 3 hits
+                            enemy.takeDamage(isKick ? 100 : 35, forward.clone().multiplyScalar(isKick ? 2.5 : 1.2));
+                            cameraShake = isKick ? 1.0 : 0.4;
+                        }, 150 / timeScale); // Delay synced with animation peak
+                    }
+                }
+            });
+        });
+
+        function spawnEnemy() {
+            const angle = Math.random() * Math.PI * 2;
+            const dist = 15 + Math.random() * 20;
+            enemies.push(new Character(player.root.position.x + Math.cos(angle) * dist, player.root.position.z + Math.sin(angle) * dist, false));
+        }
+        for (let i = 0; i < 6; i++) spawnEnemy();
+
+        function triggerCinematicSlowMo() {
+            timeScale = 0.15; // 15% speed
+            slowMoTimer = 0.8; // Real-world seconds
+        }
+
+        // --- 5. MAIN RENDER LOOP ---
+        const clock = new THREE.Clock();
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            let realDt = clock.getDelta();
+            if (realDt > 0.1) realDt = 0.1; // Cap lag spikes
+
+            // Handle Slow Motion timing
+            if (slowMoTimer > 0) {
+                slowMoTimer -= realDt;
+                if (slowMoTimer <= 0) timeScale = 1.0;
+                camera.fov = THREE.MathUtils.lerp(camera.fov, 50, 0.1); // Cinematic Zoom In
+            } else {
+                camera.fov = THREE.MathUtils.lerp(camera.fov, 70, 0.1);
+            }
+            camera.updateProjectionMatrix();
+
+            let dt = realDt * timeScale;
+            customTime += dt;
+
+            if (dt > 0) world.step(1 / 60, dt, 10);
+
+            // Sync Ragdoll Physics Bones to Graphics
+            [player, ...enemies].forEach(c => {
+                if (c.dead) {
+                    c.physicsBodies.forEach(pb => {
+                        pb.mesh.position.copy(pb.body.position);
+                        pb.mesh.quaternion.copy(pb.body.quaternion);
+                    });
+                }
+            });
+
+            // Player Movement Update
+            if (!player.dead) {
+                let moveX = 0; let moveZ = 0;
+                if (keys.w) moveZ -= 1; if (keys.s) moveZ += 1;
+                if (keys.a) moveX -= 1; if (keys.d) moveX += 1;
+
+                if ((moveX !== 0 || moveZ !== 0) && player.state !== 'punch' && player.state !== 'kick' && player.state !== 'hit') {
+                    player.state = 'walk';
+                    let dir = new THREE.Vector3(moveX, 0, moveZ).normalize();
+                    dir.applyAxisAngle(new THREE.Vector3(0, 1, 0), camYaw);
+                    player.facing.copy(dir);
+                    player.velocity.add(dir.multiplyScalar(75 * dt));
+                } else if (player.state === 'walk') player.state = 'idle';
+            }
+
+            // Enemy AI Update
+            let activeEnemies = 0;
+            for (let i = enemies.length - 1; i >= 0; i--) {
+                let e = enemies[i];
+                if (e.dead) {
+                    e.stateTimer += dt;
+                    if (e.stateTimer > 8) { // Despawn bones after 8s to save performance
+                        e.physicsBodies.forEach(pb => { world.removeBody(pb.body); scene.remove(pb.mesh); });
+                        enemies.splice(i, 1);
+                    }
+                } else {
+                    activeEnemies++;
+                    const dist = e.root.position.distanceTo(player.root.position);
+                    if (dist > 2.5) {
+                        e.state = 'walk';
+                        const dir = player.root.position.clone().sub(e.root.position).normalize();
+                        e.facing.copy(dir);
+                        e.velocity.add(dir.multiplyScalar(50 * dt)); // Enemies run fast
+                    } else if (e.state !== 'punch' && e.state !== 'kick' && e.state !== 'hit') {
+                        // Enemy Attacks Player
+                        if (Math.random() < 0.03 * timeScale) {
+                            e.state = Math.random() < 0.5 ? 'punch' : 'kick';
+                            e.stateTimer = 0;
+                            setTimeout(() => {
+                                if (!e.dead && !player.dead && e.root.position.distanceTo(player.root.position) < 3.5) {
+                                    player.takeDamage(15, player.root.position.clone().sub(e.root.position).normalize());
+                                    document.getElementById('hp').innerText = Math.max(0, player.health);
+                                    cameraShake = 0.6;
+
+                                    if (player.health <= 0) {
+                                        document.getElementById('hp').innerText = 'DEAD'; document.getElementById('hp').style.color = '#ff0000';
+                                        document.querySelector('#blocker h1').innerText = 'WASTED';
+                                        document.querySelector('#blocker p').innerText = 'Refresh the page to exact revenge.';
+                                        document.getElementById('blocker').style.display = 'flex';
+                                        if (document.pointerLockElement) document.exitPointerLock();
+                                    }
+                                }
+                            }, 200 / timeScale);
+                        } else e.state = 'idle';
+                    }
+                }
+            }
+
+            // Procedural Spawning
+            if (activeEnemies < 6 && Math.random() < 0.02 * timeScale) spawnEnemy();
+
+            // Run animations
+            player.update(dt, customTime);
+            enemies.forEach(e => e.update(dt, customTime));
+
+            // Particle Physics
+            for (let i = particles.length - 1; i >= 0; i--) {
+                let p = particles[i];
+                p.vel.y -= 40 * dt; // Gravity
+                p.mesh.position.addScaledVector(p.vel, dt);
+                if (p.mesh.position.y < 0.1) {
+                    p.mesh.position.y = 0.1; p.vel.y *= -0.4; p.vel.x *= 0.8; p.vel.z *= 0.8;
+                }
+                p.life -= dt;
+                if (p.life <= 0) { scene.remove(p.mesh); particles.splice(i, 1); }
+                else p.mesh.scale.setScalar(p.life);
+            }
+
+            // GTA-Style Over-the-Shoulder Camera tracking
+            if (!player.dead) {
+                const euler = new THREE.Euler(camPitch, camYaw, 0, 'YXZ');
+                camera.quaternion.setFromEuler(euler);
+
+                // Offset camera over the right shoulder
+                const offset = new THREE.Vector3(1.2, 0.4, 4.5);
+                offset.applyEuler(euler);
+
+                const targetPos = player.root.position.clone().add(new THREE.Vector3(0, 1.5, 0)).add(offset);
+
+                // Apply Screen Shake
+                if (cameraShake > 0) {
+                    targetPos.x += (Math.random() - 0.5) * cameraShake;
+                    targetPos.y += (Math.random() - 0.5) * cameraShake;
+                    targetPos.z += (Math.random() - 0.5) * cameraShake;
+                    cameraShake -= realDt * 2;
+                }
+
+                // Smooth camera follow
+                camera.position.lerp(targetPos, 0.25);
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        // Handle Resizing
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // Start Loop
+        animate();
+    </script>
+</body>
+
+</html>
